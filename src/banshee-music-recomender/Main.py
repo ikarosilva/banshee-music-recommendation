@@ -4,6 +4,15 @@ Created on Nov 5, 2015
 @author: Ikaro Silva
 '''
 import sys
+from scipy.stats import randint as sp_randint
+import argparse
+import numpy as np
+from numpy import genfromtxt
+from sklearn.grid_search import GridSearchCV, RandomizedSearchCV
+from sklearn.datasets import load_digits
+from sklearn.ensemble import RandomForestClassifier
+from time import time
+from operator import itemgetter
 
 def print_err(*args):
     sys.stderr.write(' '.join(map(str,args)) + '\n')
@@ -69,11 +78,6 @@ def report(grid_scores, n_top=3):
         print("")
         
 def train(features,labels): 
-    from sklearn.grid_search import GridSearchCV, RandomizedSearchCV
-    from sklearn.datasets import load_digits
-    from sklearn.ensemble import RandomForestClassifier
-    
-    
     clf = RandomForestClassifier(n_estimators=20)
     param_dist = {"max_depth": [3, None],
                   "max_features": sp_randint(1, 11),
@@ -94,9 +98,6 @@ def train(features,labels):
     report(random_search.grid_scores_)
         
 if __name__ == '__main__':
-    import argparse
-    import numpy as np
-    from numpy import genfromtxt
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', help='train recommender', action='store_true')
