@@ -7,18 +7,21 @@ import sys
 from scipy.stats import randint as sp_randint
 import argparse
 import numpy as np
-from numpy import genfromtxt
 from sklearn.grid_search import GridSearchCV, RandomizedSearchCV
 from sklearn.datasets import load_digits
 from sklearn.ensemble import RandomForestClassifier
 from time import time
 from operator import itemgetter
+import sqlite3
+from sklearn.feature_extraction.text import CountVectorizer
 
 def print_err(*args):
     sys.stderr.write(' '.join(map(str,args)) + '\n')
 
 def feature_index(feature_names):
         # TODO: Find a way to get this from the db exporter instead
+        # To explore database run : cur.execute("select name from sqlite_master where type='table'" )
+        train_query="select Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount from CoreTracks where Rating is not null;"
         HEADER=['PrimarySourceID',#     INTEGER NOT NULL,
                 'TrackID',#             INTEGER PRIMARY KEY,
                 'ArtistID',#            INTEGER,
@@ -77,7 +80,22 @@ def report(grid_scores, n_top=3):
         print("Parameters: {0}".format(score.parameters))
         print("")
         
-def train(features,labels): 
+def train(cur, query): 
+    print_err("Loading database file ...")
+    rows=cur.execute(query)
+    print("Formatting rows into features...")
+    genre=list()
+    vectorizer= CountVectorizer(min_df=5)
+    for row in rows:
+        if(row[5]):
+            genre.append(row[5])
+    x_train = vectorizer.fit_transform(genre)
+    N,M=x_train.shape
+    print("Processed %s features with %s genres..."%(N,M))
+    print(vectorizer.vocabulary_["www"])
+    #for gen in vectorizer.get_feature_names():
+    #    print(gen)
+    SystemExit
     clf = RandomForestClassifier(n_estimators=20)
     param_dist = {"max_depth": [3, None],
                   "max_features": sp_randint(1, 11),
@@ -99,19 +117,17 @@ def train(features,labels):
         
 if __name__ == '__main__':
     
+    #r=cur.execute("select sql from sqlite_master where name='CoreTracks'" )
+    #r=cur.execute("select TrackID,Rating from CoreTracks where Rating is not null;" )
+    #for row in cur:
+    #    print row
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', help='train recommender', action='store_true')
     args = parser.parse_args()
     
-    feature_names=['ArtistID','AlbumID','YEAR','Score','PlayCount','SkipCount']
-    db_ind=feature_index(feature_names)
-    label_ind=feature_index('Rating')
-    print_err("Loading database file (ind=%s)..."%str(db_ind))
-    features = genfromtxt('/home/ikaro/music-commands/test', 
-                      usecols=db_ind,delimiter=',')
-    labels=genfromtxt('/home/ikaro/music-commands/test', 
-                      usecols=label_ind,delimiter=',')
-    print_err("Finished loading database file. data size=%s"%(features))
+    connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
+    cur = connection.cursor()
     
-    classifier=train(features,labels)
+    train_query="select Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount from CoreTracks where Rating is not null;"
+    classifier=train(cur,train_query)
     
