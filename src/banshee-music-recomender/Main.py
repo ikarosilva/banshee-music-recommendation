@@ -14,6 +14,7 @@ from time import time
 from operator import itemgetter
 import sqlite3
 from sklearn.feature_extraction.text import CountVectorizer
+from numpy import shape
 
 HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INTEGER",'AlbumID':"INTEGER",'TagSetID':"INTEGER",'ExternalID':"INTEGER",'MusicBrainzID':"TEXT",
                 'Uri':"TEXT",'MimeType':"TEXT",'FileSize':"INTEGER",'BitRate':"INTEGER",'SampleRate':"INTEGER",'BitsPerSample':"INTEGER",'Attributes':"INTEGER",
@@ -52,9 +53,6 @@ def get_features(cur,query,header):
     genre=list()
     composer=list()
     conductor=list()
-    genre_vectorizer= CountVectorizer()
-    composer_vectorizer= CountVectorizer()
-    conductor_vectorizer= CountVectorizer()
     HEADER=header.split(",")
     genre_ind=[ i for i, j in enumerate(HEADER) if j=="Genre"]
     genre_ind=genre_ind[0] if len(genre_ind)>0 else None
@@ -64,52 +62,45 @@ def get_features(cur,query,header):
     conductor_ind =conductor_ind[0] if len(conductor_ind)>0 else None
     count=0
     columns=len(HEADER)-1
+    features=list()
+    labels=list()
+    empty=0
     for row in rows:
-        if(genre_ind):
-            if(row[genre_ind]):
-                genre.append(row[genre_ind])
-        if(composer_ind):
-            if(row[composer_ind]):
-                composer.append(row[composer_ind])
-        if(conductor_ind):
-            if(row[conductor_ind]):
-                conductor.append(row[conductor_ind])
-        count+=1
-    genre_train = genre_vectorizer.fit_transform(genre)
-    composer_train = composer_vectorizer.fit_transform(composer)
-    composer_preprocessor=composer_vectorizer.build_preprocessor()
-    conductor_train = conductor_vectorizer.fit_transform(conductor)
-
-    #Create feature map
-    features=np.zeros((count,columns))
-    labels=np.zeros((count,1))
-    count=0
-    rows=cur.execute(query)
-    for row in rows:
-        labels=row[0]
-        for feature in range(1,columns):
-            print("row[%s]=%s"%(feature,row[feature]))
-            if(feature == genre_ind and row[feature]):
-                features[count,feature]=genre_vectorizer.vocabulary_[row[feature].lower()]
-            elif (feature == composer_ind and row[feature]):
-                v=composer_preprocessor(row[feature])
-                print("v=%s"%(v))
-                features[count,feature]=composer_vectorizer.vocabulary_[v]
-            elif (feature == conductor_ind and row[feature]):
-                features[count,feature]=conductor_vectorizer.vocabulary_[row[feature].lower()]
+        labels.append(row[0])
+        feat_vect=list()
+        for feature in range(1,columns):  
+            if(row[feature]):
+                if(feature == genre_ind):
+                    if(row[genre_ind] not in genre):
+                        genre.append(row[genre_ind])
+                    feat_vect.append(genre.index(row[genre_ind]))
+                elif(feature == composer_ind):
+                    if(row[composer_ind] not in composer):
+                        composer.append(row[composer_ind])
+                    feat_vect.append(composer.index(row[composer_ind]))
+                elif(feature == conductor_ind):
+                    if(row[conductor_ind] not in conductor):
+                        conductor.append(row[conductor_ind])
+                    feat_vect.append(conductor.index(row[conductor_ind]))
+                else:
+                    feat_vect.append(row[feature])
             else:
-                features[count,feature]=row[feature]
-        print("features[count,:]=%s"%(features[count,:]))
+                feat_vect.append(-1)
+                empty+=1
+        features.append(feat_vect)
+        count+=1
 
+    print(" %s rows ( %s empty cells)"%(len(features),empty))
+    features=np.array(features)
+    labels=np.array(labels)
     print("Generated %s features..."%(str(features.shape)))
-    return labels, features, genre_vectorizer, composer_vectorizer,conductor_vectorizer
+    return labels, features, genre,composer,conductor
 
 def train(cur, query,header): 
-    labels, features, genre_vectorizer, composer_vectorizer,conductor_vectorizer = get_features(cur,query,header)
-    print("features.shape[1,:]=%s"%(features[1,:]))
+    labels, features, genre, composer,conductor= get_features(cur,query,header)
     clf = RandomForestClassifier(n_estimators=20)
     param_dist = {"max_depth": [3, None],
-                  "max_features": features.shape[1],
+                  "max_features": [8],
                   "min_samples_split": sp_randint(1, 11),
                   "min_samples_leaf": sp_randint(1, 11),
                   "bootstrap": [True, False],
@@ -121,7 +112,8 @@ def train(cur, query,header):
                                        n_iter=n_iter_search)
     
     start = time()
-    print("features=%s"%str(np.sum(features)))
+    print("%s features..."%(str(features.shape)))
+    print("%s labels..."%((labels)))
     random_search.fit(features,labels)
     print("RandomizedSearchCV took %.2f seconds for %d candidates"
           " parameter settings." % ((time() - start), n_iter_search))
