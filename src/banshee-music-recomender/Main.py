@@ -37,6 +37,36 @@ def feature_index(feature_names):
             
         return tuple([ i for i, j in enumerate(HEADER) if j in feature_names])
 
+def remove_repeats(features,labels,uri):
+        print("Searching for repeated features")
+        repeats=set()
+        # ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount,Uri"
+        col_ind=[0,1,2,3,4,5,6]
+        M = len(col_ind)
+        remove_uri=list()
+        for i in range(np.shape(features)[0]-1):
+            for j in range(i+1,np.shape(features)[0]):
+                not_repeat=0
+                for col in col_ind:
+                    if(features[i,col]==features[j,col]):
+                        not_repeat+=1
+                if(not_repeat == M and (features[i,0] != 10351)):
+                    title1=uri[i].split('/')
+                    title2=uri[j].split('/')
+                    if(title1[-1]==title2[-1]):
+                        #print("features[%s,col]=%s"%(i,features[i,:]))
+                        #print("features[%s,col]=%s"%(j,features[j,:]))
+                        #print("%s"%(str(uri[i])))
+                        #print("%s"%(str(uri[j])))
+                        repeats.add(j)
+                        remove_uri.append(uri[j])
+            
+        print("Removing %s repeated rows"%(len(repeats)))
+        features=np.delete(features, list(repeats), axis=0)
+        labels=np.delete(labels,list(repeats),axis=0)
+        uri=[x for x in uri if x not in remove_uri]
+        return features,labels,uri
+
 def report(grid_scores, n_top=3):
     top_scores = sorted(grid_scores, key=itemgetter(1), reverse=True)[:n_top]
     for i, score in enumerate(top_scores):
@@ -53,6 +83,7 @@ def get_features(cur,query,header):
     genre=list()
     composer=list()
     conductor=list()
+    uri=list()
     HEADER=header.split(",")
     genre_ind=[ i for i, j in enumerate(HEADER) if j=="Genre"]
     genre_ind=genre_ind[0] if len(genre_ind)>0 else None
@@ -60,6 +91,8 @@ def get_features(cur,query,header):
     composer_ind=composer_ind[0] if len(composer_ind)>0 else None
     conductor_ind=[ i for i, j in enumerate(HEADER) if j=="Conductor"]
     conductor_ind =conductor_ind[0] if len(conductor_ind)>0 else None
+    uri_ind=[ i for i, j in enumerate(HEADER) if j=="Uri"]
+    uri_ind =uri_ind[0] if len(uri_ind)>0 else None
     count=0
     columns=len(HEADER)-1
     features=list()
@@ -68,7 +101,7 @@ def get_features(cur,query,header):
     for row in rows:
         labels.append(row[0])
         feat_vect=list()
-        for feature in range(1,columns):  
+        for feature in range(1,columns+1):  
             if(row[feature]):
                 if(feature == genre_ind):
                     if(row[genre_ind] not in genre):
@@ -82,34 +115,38 @@ def get_features(cur,query,header):
                     if(row[conductor_ind] not in conductor):
                         conductor.append(row[conductor_ind])
                     feat_vect.append(conductor.index(row[conductor_ind]))
+                elif(feature == uri_ind):
+                    uri.append(row[uri_ind])
                 else:
                     feat_vect.append(row[feature])
             else:
                 feat_vect.append(-1)
                 empty+=1
+                #print("feat=%s"%(feat_vect))
+                #print("row=%s"%(str(row)))
         features.append(feat_vect)
         count+=1
 
-    print(" %s rows ( %s empty cells)"%(len(features),empty))
+    print(" %s rows ( %s empty cells) (uri=%s)"%(len(features),empty,len(uri)))
     features=np.array(features)
     labels=np.array(labels)
+    features,labels,uri=remove_repeats(features,labels,uri)
     print("Generated %s features..."%(str(features.shape)))
-    return labels, features, genre,composer,conductor
+    return labels, features, genre,composer,conductor, uri
 
 def train(cur, query,header): 
-    labels, features, genre, composer,conductor= get_features(cur,query,header)
-    clf = RandomForestClassifier(n_estimators=20)
-    param_dist = {"max_depth": [3, None],
+    labels, features, genre, composer,conductor, uri= get_features(cur,query,header)
+    clf = RandomForestClassifier(n_estimators=40)
+    param_dist = {"max_depth": [6],
                   "max_features": [8],
-                  "min_samples_split": sp_randint(1, 11),
-                  "min_samples_leaf": sp_randint(1, 11),
+                  "min_samples_split": [1, 3, 8],
+                  "min_samples_leaf": [3 , 11],
                   "bootstrap": [True, False],
                   "criterion": ["gini", "entropy"]}
     
     # run randomized search
-    n_iter_search = 20
-    random_search = RandomizedSearchCV(clf, param_distributions=param_dist,
-                                       n_iter=n_iter_search)
+    n_iter_search = 40
+    random_search = GridSearchCV(clf,param_grid=param_dist)
     
     start = time()
     print("%s features..."%(str(features.shape)))
@@ -118,7 +155,8 @@ def train(cur, query,header):
     print("RandomizedSearchCV took %.2f seconds for %d candidates"
           " parameter settings." % ((time() - start), n_iter_search))
     report(random_search.grid_scores_)
-        
+    print("Training complete!")
+    
 if __name__ == '__main__':
     
     #r=cur.execute("select sql from sqlite_master where name='CoreTracks'" )
@@ -131,7 +169,7 @@ if __name__ == '__main__':
     
     connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
     cur = connection.cursor()
-    header="Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount"
+    header="Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount,Uri"
     train_query="select " + header +" from CoreTracks where Rating >0;"
     classifier=train(cur,train_query,header)
     
