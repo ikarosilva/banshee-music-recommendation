@@ -181,12 +181,16 @@ def train(cur, query,header):
     print("RandomizedSearchCV took %.2f seconds for %d candidates"
           " parameter settings." % ((time() - start), n_iter_search))
     report(random_search.grid_scores_)
-    weight=forest.feature_importances_[:].sort()
-    feat_names=header[1:-1] #ignore first (label) and last (uri)
-    best_features=[feat_names[forest.feature_importances_[i]._index] for i in weight ]
+    weight=random_search.best_estimator_.feature_importances_[:].tolist()
+    weight.sort(reverse=True)
+    original=random_search.best_estimator_.feature_importances_[:].tolist()
+    weigth.tolist().sort()
+    feat_names=header.split(',')
+    feat_names=feat_names[1:-1] #ignore first (label) and last (uri)
+    best_features=[feat_names[original.index(i)] for i in weight ]
     print("Best features=%s"%str(best_features))
     print("Generating suggestion list from %s songs"%(len(test_uri)))
-    predictions= random_search.predict(features)
+    predictions= random_search.predict(test_features)
     suggestions=[ test_uri[i] for i,x in enumerate(predictions) if x==1]
     for song in suggestions:
         print "Suggestion: "+ str(song)
