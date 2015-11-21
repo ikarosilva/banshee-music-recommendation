@@ -25,6 +25,9 @@ HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INT
                 'LastSyncedStamp':"INTEGER",'FileModifiedStamp':"INTEGER"
                 }
 
+CLASS_CUTOFF=4
+LIMIT=8000
+
 def print_err(*args):
     sys.stderr.write(' '.join(map(str,args)) + '\n')
     
@@ -41,7 +44,7 @@ def remove_repeats(features,labels,uri):
         print("Searching for repeated features")
         repeats=set()
         # ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount,Uri"
-        col_ind=[0,1,2,3,4,5,6]
+        col_ind=range(features.shape[1])
         M = len(col_ind)
         remove_uri=list()
         for i in range(np.shape(features)[0]-1):
@@ -50,7 +53,7 @@ def remove_repeats(features,labels,uri):
                 for col in col_ind:
                     if(features[i,col]==features[j,col]):
                         not_repeat+=1
-                if(not_repeat == M and (features[i,0] != 10351)):
+                if(not_repeat == M ):#and (features[i,0] != 10351)):
                     title1=uri[i].split('/')
                     title2=uri[j].split('/')
                     if(title1[-1]==title2[-1]):
@@ -63,7 +66,8 @@ def remove_repeats(features,labels,uri):
             
         print("Removing %s repeated rows"%(len(repeats)))
         features=np.delete(features, list(repeats), axis=0)
-        labels=np.delete(labels,list(repeats),axis=0)
+        if (labels != None):
+            labels=np.delete(labels,list(repeats),axis=0)
         uri=[x for x in uri if x not in remove_uri]
         return features,labels,uri
 
@@ -97,9 +101,15 @@ def get_features(cur,query,header):
     columns=len(HEADER)-1
     features=list()
     labels=list()
+    test_features=list()
+    test_uri=list()
     empty=0
     for row in rows:
-        labels.append(row[0])
+        if(row[0]==0):
+            in_test=True
+        else:
+            in_test=False
+           
         feat_vect=list()
         for feature in range(1,columns+1):  
             if(row[feature]):
@@ -116,7 +126,10 @@ def get_features(cur,query,header):
                         conductor.append(row[conductor_ind])
                     feat_vect.append(conductor.index(row[conductor_ind]))
                 elif(feature == uri_ind):
-                    uri.append(row[uri_ind])
+                    if(in_test):
+                        test_uri.append(row[uri_ind])
+                    else:
+                        uri.append(row[uri_ind])
                 else:
                     feat_vect.append(row[feature])
             else:
@@ -124,38 +137,59 @@ def get_features(cur,query,header):
                 empty+=1
                 #print("feat=%s"%(feat_vect))
                 #print("row=%s"%(str(row)))
-        features.append(feat_vect)
-        count+=1
+        if(in_test):
+            test_features.append(feat_vect)
+        else:
+            labels.append(row[0])
+            features.append(feat_vect)
+            count+=1
+            if(count>LIMIT):
+                break
 
     print(" %s rows ( %s empty cells) (uri=%s)"%(len(features),empty,len(uri)))
     features=np.array(features)
+    test_features=np.array(test_features)
+    
+    labels=[1 if x>CLASS_CUTOFF else 0 for x in labels]
     labels=np.array(labels)
     features,labels,uri=remove_repeats(features,labels,uri)
+    test_features,_,test_uri=remove_repeats(test_features,None,test_uri)
     print("Generated %s features..."%(str(features.shape)))
-    return labels, features, genre,composer,conductor, uri
+    return labels, features, genre,composer,conductor, uri, test_features, test_uri
 
 def train(cur, query,header): 
-    labels, features, genre, composer,conductor, uri= get_features(cur,query,header)
-    clf = RandomForestClassifier(n_estimators=40)
-    param_dist = {"max_depth": [6],
-                  "max_features": [8],
-                  "min_samples_split": [1, 3, 8],
-                  "min_samples_leaf": [3 , 11],
-                  "bootstrap": [True, False],
-                  "criterion": ["gini", "entropy"]}
+    labels, features, genre, composer,conductor, uri, test_features, test_uri= get_features(cur,query,header)
+    
+    
+    clf = RandomForestClassifier()
+    param_dist = {"max_depth": [8, 16],
+                  "max_features": [2, 4 , 8],
+                  "min_samples_split": [1, 3, 5, 10],
+                  "min_samples_leaf": [3 , 11, 16],
+                  "bootstrap": [False],
+                  "n_estimators":[2, 5, 20, 40, 80],
+                  "criterion": ["gini"]}
     
     # run randomized search
-    n_iter_search = 40
-    random_search = GridSearchCV(clf,param_grid=param_dist)
-    
+    n_iter_search = 100
+    random_search = GridSearchCV(clf,param_grid=param_dist,n_jobs=3, refit=True)
     start = time()
+    print("Training classifier...")
     print("%s features..."%(str(features.shape)))
-    print("%s labels..."%((labels)))
+    #print("%s labels..."%((labels)))
     random_search.fit(features,labels)
     print("RandomizedSearchCV took %.2f seconds for %d candidates"
           " parameter settings." % ((time() - start), n_iter_search))
     report(random_search.grid_scores_)
-    print("Training complete!")
+    weight=forest.feature_importances_[:].sort()
+    feat_names=header[1:-1] #ignore first (label) and last (uri)
+    best_features=[feat_names[forest.feature_importances_[i]._index] for i in weight ]
+    print("Best features=%s"%str(best_features))
+    print("Generating suggestion list from %s songs"%(len(test_uri)))
+    predictions= random_search.predict(features)
+    suggestions=[ test_uri[i] for i,x in enumerate(predictions) if x==1]
+    for song in suggestions:
+        print "Suggestion: "+ str(song)
     
 if __name__ == '__main__':
     
@@ -166,10 +200,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', help='train recommender', action='store_true')
     args = parser.parse_args()
-    
+    start = time()
     connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
     cur = connection.cursor()
     header="Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount,Uri"
-    train_query="select " + header +" from CoreTracks where Rating >0;"
+    train_query="select " + header +" from CoreTracks;"
     classifier=train(cur,train_query,header)
-    
+    print("Classification complete, total time= %s minutes" % (str((time() - start)/60.0)))
