@@ -15,6 +15,7 @@ from operator import itemgetter
 import sqlite3
 from sklearn.feature_extraction.text import CountVectorizer
 from numpy import shape
+from gensim import corpora, models
 
 HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INTEGER",'AlbumID':"INTEGER",'TagSetID':"INTEGER",'ExternalID':"INTEGER",'MusicBrainzID':"TEXT",
                 'Uri':"TEXT",'MimeType':"TEXT",'FileSize':"INTEGER",'BitRate':"INTEGER",'SampleRate':"INTEGER",'BitsPerSample':"INTEGER",'Attributes':"INTEGER",
@@ -26,11 +27,22 @@ HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INT
                 }
 
 CLASS_CUTOFF=4
-LIMIT=8000
+LIMIT=80000
 
 def print_err(*args):
     sys.stderr.write(' '.join(map(str,args)) + '\n')
-    
+   
+def add_suggestion(cur,connection,track_id):
+    rows=cur.execute("select max(EntryId) from CorePlaylistEntries")
+    #print("\n".join([str(i) for i in rows]))
+    index=rows.fetchall()[0][0]+1
+    order=cur.execute("select max(ViewOrder) from CorePlaylistEntries where PlaylistID=13")
+    view_order=order.fetchall()[0][0]+1
+    query="insert into CorePlaylistEntries (EntryID,PlaylistID,TrackID,ViewOrder,Generated) values (%s,13,%s,%s,0)"%(index,track_id,view_order)
+    print query
+    cur.execute(query)
+    connection.commit()
+    print("Inserted suggestion into db.Out:")
 
 def feature_index(feature_names):
         # TODO: Find a way to get this from the db exporter instead
@@ -88,6 +100,8 @@ def get_features(cur,query,header):
     composer=list()
     conductor=list()
     uri=list()
+    title=list()
+    test_title=list()
     HEADER=header.split(",")
     genre_ind=[ i for i, j in enumerate(HEADER) if j=="Genre"]
     genre_ind=genre_ind[0] if len(genre_ind)>0 else None
@@ -97,6 +111,8 @@ def get_features(cur,query,header):
     conductor_ind =conductor_ind[0] if len(conductor_ind)>0 else None
     uri_ind=[ i for i, j in enumerate(HEADER) if j=="Uri"]
     uri_ind =uri_ind[0] if len(uri_ind)>0 else None
+    title_ind=[ i for i, j in enumerate(HEADER) if j=="Title"]
+    title_ind =title_ind[0] if len(title_ind)>0 else None
     count=0
     columns=len(HEADER)-1
     features=list()
@@ -115,16 +131,21 @@ def get_features(cur,query,header):
             if(row[feature]):
                 if(feature == genre_ind):
                     if(row[genre_ind] not in genre):
-                        genre.append(row[genre_ind])
-                    feat_vect.append(genre.index(row[genre_ind]))
+                        genre.append(row[genre_ind].lower())
+                    feat_vect.append(genre.index(row[genre_ind].lower()))
                 elif(feature == composer_ind):
                     if(row[composer_ind] not in composer):
-                        composer.append(row[composer_ind])
-                    feat_vect.append(composer.index(row[composer_ind]))
+                        composer.append(row[composer_ind].lower())
+                    feat_vect.append(composer.index(row[composer_ind].lower()))
                 elif(feature == conductor_ind):
                     if(row[conductor_ind] not in conductor):
-                        conductor.append(row[conductor_ind])
-                    feat_vect.append(conductor.index(row[conductor_ind]))
+                        conductor.append(row[conductor_ind].lower())
+                    feat_vect.append(conductor.index(row[conductor_ind].lower()))
+                elif(feature == title_ind):
+                    if(in_test):
+                        test_title.append(row[title_ind].lower().split())
+                    else:
+                        title.append(row[title_ind].lower().split())
                 elif(feature == uri_ind):
                     if(in_test):
                         test_uri.append(row[uri_ind])
@@ -146,6 +167,10 @@ def get_features(cur,query,header):
             if(count>LIMIT):
                 break
 
+    #Get title topics
+    #print(title)
+    #model = models.ldamodel.LdaModel(title,num_topics=5)
+    #print(model[title]) 
     print(" %s rows ( %s empty cells) (uri=%s)"%(len(features),empty,len(uri)))
     features=np.array(features)
     test_features=np.array(test_features)
@@ -184,7 +209,7 @@ def train(cur, query,header):
     weight=random_search.best_estimator_.feature_importances_[:].tolist()
     weight.sort(reverse=True)
     original=random_search.best_estimator_.feature_importances_[:].tolist()
-    weigth.tolist().sort()
+    weight.sort()
     feat_names=header.split(',')
     feat_names=feat_names[1:-1] #ignore first (label) and last (uri)
     best_features=[feat_names[original.index(i)] for i in weight ]
@@ -192,8 +217,12 @@ def train(cur, query,header):
     print("Generating suggestion list from %s songs"%(len(test_uri)))
     predictions= random_search.predict(test_features)
     suggestions=[ test_uri[i] for i,x in enumerate(predictions) if x==1]
+    f = open('/tmp/recommender.m3u','w')
+    print("%s suggestions available."%(len(suggestions)))
     for song in suggestions:
         print "Suggestion: "+ str(song)
+        f.write(str(song)+'\n')
+    f.close()
     
 if __name__ == '__main__':
     
@@ -207,7 +236,8 @@ if __name__ == '__main__':
     start = time()
     connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
     cur = connection.cursor()
-    header="Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount,Uri"
+    header="Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Uri"
     train_query="select " + header +" from CoreTracks;"
     classifier=train(cur,train_query,header)
     print("Classification complete, total time= %s minutes" % (str((time() - start)/60.0)))
+    connection.close()
