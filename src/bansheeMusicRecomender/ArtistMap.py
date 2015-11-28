@@ -6,9 +6,10 @@ Created on Nov 22, 2015
 import re
 
 def artist_map(cur):
-    stop=['vs', 'ft', 'feat', 'featuring','and','the','faixa','dj', '&']
+    stop=['vs', 'featuring','faixa', '&']
     seed=['tupac','tiesto','souljaboy']
-    artist=[ " ".join(filter(lambda w: w not in stop, re.split(r'\W+', i[1].lower().replace("_"," ").replace(","," ").replace("&"," ") ))).encode('ascii','ignore') 
+    artist=[ " ".join(filter(lambda w: w not in stop, 
+                             re.split(r'\W+', i[1].lower().replace("_"," ").replace(","," ").replace("&"," ").replace("-"," ").replace("feat"," ").replace("ft"," ").replace("and"," ").replace("of"," ").replace("the"," ").replace("dj"," ") ))).encode('ascii','ignore') 
             for i in cur.execute("select ArtistId,NameLowered from CoreArtists") if i[1]!= None ]
     
     print ("Total artists = %s"%len(artist))
@@ -35,12 +36,16 @@ def artist_map(cur):
     all_artists=[i for i in cur.execute("select ArtistId,NameLowered from CoreArtists") if i[1]!= None]
     art_map=dict()
     for query in all_artists:
+        test=-1
+        art_name=query[1].encode('ascii','ignore').lower().replace("_"," ").replace(","," ").replace("&"," ").replace("-"," ").replace("feat"," ").replace("ft"," ").replace("and"," ").replace("of"," ").replace("the"," ").replace("dj"," ")
+        art_name =  re.sub(r'\s+',"", art_name)
         for ind,art in enumerate(unique_artist):
-            art_name=query[1].lower().strip().replace("_"," ")
-            art_name =  re.sub(r'\s+', "", art_name)
             test=art_name.find(art)
             if(test>=0):
                 art_map[query[0]]= ind
-                break 
+                break
+        if(test==-1):
+            print("Could not match artist: %s"%(art_name))
+            art_map[query[0]]= -1 
     print("Artist map size=%s"%len(art_map.keys()))
     return art_map

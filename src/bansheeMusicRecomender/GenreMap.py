@@ -28,7 +28,7 @@ def genre_map(cur):
     unique_genre.sort(key=lambda item: (item,-len(item)))
     print ("Unique genres= %s"%len(unique_genre))
     genre_map=dict()
-    all_genre = [ i[0].lower() for i in cur.execute("select Genre from CoreTracks") if (i[0] != None) ]
+    all_genre = [ i[0].encode('ascii','ignore').lower() for i in cur.execute("select Genre from CoreTracks") if (i[0] != None) ]
     for g_name in all_genre:
         for ind,art in enumerate(unique_genre):
             test=g_name.find(art)

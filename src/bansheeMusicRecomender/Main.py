@@ -145,7 +145,7 @@ def get_features(cur,query,header):
             if(row[feature]):
                 if(feature == genre_ind):
                     #Clean up ID, mapp do less redundant set
-                    tmp_genre=row[feature].lower() #.replace("_"," ").replace(" ","").strip()
+                    tmp_genre=row[feature].lower().encode('ascii','ignore') #.replace("_"," ").replace(" ","").strip()
                     #tmp_genre = re.sub(r'\s+', "", tmp_genre) 
                     genre_id=unique_genre_map.get(tmp_genre,-1)
                     if(genre_id==-1):
@@ -178,7 +178,9 @@ def get_features(cur,query,header):
                     artist_id=unique_artists_map.get(row[feature],-1)
                     if(artist_id==-1):
                         unique_artists_map[row[feature]]=-2
-                        #print("Could not find key for artist:%s"%(row[feature]))
+                        print("Could not find key for artist:%s"%(row[feature]))
+                        #print unique_artists_map.keys()
+                        #sys.exit(0)
                     feat_vect.append(artist_id)
                 else:
                     feat_vect.append(row[feature])
