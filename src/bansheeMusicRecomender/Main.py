@@ -1,3 +1,4 @@
+#/usr/bin/env python
 '''
 Created on Nov 5, 2015
 
@@ -16,6 +17,9 @@ import sqlite3
 from sklearn.feature_extraction.text import CountVectorizer
 from numpy import shape
 from gensim import corpora, models
+from ArtistMap import artist_map
+from GenreMap import genre_map
+import re
 
 HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INTEGER",'AlbumID':"INTEGER",'TagSetID':"INTEGER",'ExternalID':"INTEGER",'MusicBrainzID':"TEXT",
                 'Uri':"TEXT",'MimeType':"TEXT",'FileSize':"INTEGER",'BitRate':"INTEGER",'SampleRate':"INTEGER",'BitsPerSample':"INTEGER",'Attributes':"INTEGER",
@@ -26,7 +30,7 @@ HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INT
                 'LastSyncedStamp':"INTEGER",'FileModifiedStamp':"INTEGER"
                 }
 
-CLASS_CUTOFF=4
+CLASS_CUTOFF=3
 LIMIT=80000
 
 def print_err(*args):
@@ -47,7 +51,7 @@ def add_suggestion(cur,connection,track_id):
 def feature_index(feature_names):
         # TODO: Find a way to get this from the db exporter instead
         # To explore database run : cur.execute("select name from sqlite_master where type='table'" )
-        train_query="select Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount from CoreTracks where Rating is not null;"
+        train_query="select Rating,ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,PlayCount,SkipCount from CoreTracks where Rating is not null;"
         
             
         return tuple([ i for i, j in enumerate(HEADER) if j in feature_names])
@@ -94,7 +98,14 @@ def report(grid_scores, n_top=3):
         print("")
 
 def get_features(cur,query,header):   
-    print_err("Loading database file ...")
+    
+    print ("Getting genre info...")
+    unique_genre_map=genre_map(cur)
+    print("Genres=%s"%str(unique_genre_map.keys()))
+    #Get artist map, to clean up redundancies
+    print("Getting artist info...")
+    unique_artists_map=artist_map(cur)
+    print("Loading database file ...")
     rows=cur.execute(query)
     genre=list()
     composer=list()
@@ -105,6 +116,8 @@ def get_features(cur,query,header):
     HEADER=header.split(",")
     genre_ind=[ i for i, j in enumerate(HEADER) if j=="Genre"]
     genre_ind=genre_ind[0] if len(genre_ind)>0 else None
+    artist_ind=[ i for i, j in enumerate(HEADER) if j=="ArtistID"]
+    artist_ind=artist_ind[0] if len(artist_ind)>0 else None
     composer_ind=[ i for i, j in enumerate(HEADER) if j=="Composer"]
     composer_ind=composer_ind[0] if len(composer_ind)>0 else None
     conductor_ind=[ i for i, j in enumerate(HEADER) if j=="Conductor"]
@@ -120,6 +133,7 @@ def get_features(cur,query,header):
     test_features=list()
     test_uri=list()
     empty=0
+    
     for row in rows:
         if(row[0]==0):
             in_test=True
@@ -130,9 +144,17 @@ def get_features(cur,query,header):
         for feature in range(1,columns+1):  
             if(row[feature]):
                 if(feature == genre_ind):
-                    if(row[genre_ind] not in genre):
-                        genre.append(row[genre_ind].lower())
-                    feat_vect.append(genre.index(row[genre_ind].lower()))
+                    #Clean up ID, mapp do less redundant set
+                    tmp_genre=row[feature].lower() #.replace("_"," ").replace(" ","").strip()
+                    #tmp_genre = re.sub(r'\s+', "", tmp_genre) 
+                    genre_id=unique_genre_map.get(tmp_genre,-1)
+                    if(genre_id==-1):
+                        #print sorted(unique_genre_map.keys())
+                        unique_genre_map[tmp_genre]=-2
+                        print("Could not find key for genre:%s**"%(tmp_genre))
+                        #print unique_genre_map.keys()
+                        #sys.exit(0)
+                    feat_vect.append(genre_id)
                 elif(feature == composer_ind):
                     if(row[composer_ind] not in composer):
                         composer.append(row[composer_ind].lower())
@@ -151,13 +173,19 @@ def get_features(cur,query,header):
                         test_uri.append(row[uri_ind])
                     else:
                         uri.append(row[uri_ind])
+                elif(feature == artist_ind):
+                    #Clean up ID, mapp do less redundant set
+                    artist_id=unique_artists_map.get(row[feature],-1)
+                    if(artist_id==-1):
+                        unique_artists_map[row[feature]]=-2
+                        #print("Could not find key for artist:%s"%(row[feature]))
+                    feat_vect.append(artist_id)
                 else:
                     feat_vect.append(row[feature])
             else:
                 feat_vect.append(-1)
                 empty+=1
                 #print("feat=%s"%(feat_vect))
-                #print("row=%s"%(str(row)))
         if(in_test):
             test_features.append(feat_vect)
         else:
@@ -188,7 +216,7 @@ def train(cur, query,header):
     
     clf = RandomForestClassifier()
     param_dist = {"max_depth": [8, 16],
-                  "max_features": [2, 4 , 8],
+                  "max_features": [2, 4 , np.shape(features)[1]],
                   "min_samples_split": [1, 3, 5, 10],
                   "min_samples_leaf": [3 , 11, 16],
                   "bootstrap": [False],
@@ -220,7 +248,7 @@ def train(cur, query,header):
     f = open('/tmp/recommender.m3u','w')
     print("%s suggestions available."%(len(suggestions)))
     for song in suggestions:
-        print "Suggestion: "+ str(song)
+        #print "Suggestion: "+ str(song)
         f.write(str(song)+'\n')
     f.close()
     
@@ -236,7 +264,7 @@ if __name__ == '__main__':
     start = time()
     connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
     cur = connection.cursor()
-    header="Rating, ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Uri"
+    header="Rating,ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Uri"
     train_query="select " + header +" from CoreTracks;"
     classifier=train(cur,train_query,header)
     print("Classification complete, total time= %s minutes" % (str((time() - start)/60.0)))
