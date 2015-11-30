@@ -30,8 +30,8 @@ HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INT
                 'LastSyncedStamp':"INTEGER",'FileModifiedStamp':"INTEGER"
                 }
 
-CLASS_CUTOFF=3
-LIMIT=80000
+CLASS_CUTOFF=4
+LIMIT=8000
 
 def print_err(*args):
     sys.stderr.write(' '.join(map(str,args)) + '\n')
@@ -212,12 +212,79 @@ def get_features(cur,query,header):
     print("Generated %s features..."%(str(features.shape)))
     return labels, features, genre,composer,conductor, uri, test_features, test_uri
 
-def train(cur, query,header): 
+def train_svm(cur, query,header): 
+    from sklearn import datasets
+    from sklearn.cross_validation import train_test_split
+    from sklearn.grid_search import GridSearchCV
+    from sklearn.metrics import classification_report
+    from sklearn.svm import SVC
+    from sklearn.preprocessing import StandardScaler
+    labels, features, genre, composer,conductor, uri, test_features, test_uri= get_features(cur,query,header)
+    
+
+    # Split the dataset in two equal parts
+    sc = StandardScaler().fit(features,labels)
+    features = sc.transform(features,labels)
+    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.25, random_state=0)
+    # Set the parameters by cross-validation
+    #tuned_parameters = [{'kernel': ['rbf'], 'gamma': [1e-3, 1e-4],
+    #                 'C': [1, 10]},
+    #                {'kernel': ['linear'], 'C': [1, 10]}]
+
+    
+    tuned_parameters = [{'kernel': ['rbf'], 'gamma': [1e-3, 1e-4],
+                     'C': [1, 10]}]
+
+    scores = ['precision', 'recall']
+
+    start = time()
+    clf=None
+    for score in scores:
+        print("# Tuning hyper-parameters for %s" % score)
+        print()
+    
+        clf = GridSearchCV(SVC(C=1), tuned_parameters, cv=5,n_jobs=3, 
+                           scoring='%s_weighted' % score)
+        clf.fit(X_train, y_train)
+    
+        print("Best parameters set found on development set:")
+        print()
+        print(clf.best_params_)
+        print()
+        print("Grid scores on development set:")
+        print()
+        for params, mean_score, scores in clf.grid_scores_:
+            print("%0.3f (+/-%0.03f) for %r"
+                  % (mean_score, scores.std() * 2, params))
+        print()
+    
+        print("Detailed classification report:")
+        print()
+        print("The model is trained on the full development set.")
+        print("The scores are computed on the full evaluation set.")
+        print()
+        y_true, y_pred = y_test, clf.predict(X_test)
+        print(classification_report(y_true, y_pred))
+        print()
+    
+    
+    print("Generating suggestion list from %s songs"%(len(test_uri)))
+    test_features = sc.transform(test_features)
+    predictions= clf.predict(test_features)
+    suggestions=[ test_uri[i] for i,x in enumerate(predictions) if x==1]
+    f = open('/tmp/recommender.m3u','w')
+    print("%s suggestions available."%(len(suggestions)))
+    for song in suggestions:
+        #print "Suggestion: "+ str(song)
+        f.write(str(song)+'\n')
+    f.close()
+    
+def train_forest(cur, query,header): 
     labels, features, genre, composer,conductor, uri, test_features, test_uri= get_features(cur,query,header)
     
     
     clf = RandomForestClassifier()
-    param_dist = {"max_depth": [8, 16],
+    param_dist = {"max_depth": [4, 8, 16],
                   "max_features": [2, 4 , np.shape(features)[1]],
                   "min_samples_split": [1, 3, 5, 10],
                   "min_samples_leaf": [3 , 11, 16],
@@ -266,8 +333,9 @@ if __name__ == '__main__':
     start = time()
     connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
     cur = connection.cursor()
-    header="Rating,ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Uri"
+    header="Rating,ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Duration,Uri"
+    #header="Rating,ArtistID,AlbumID,Disc,Genre,Uri"
     train_query="select " + header +" from CoreTracks;"
-    classifier=train(cur,train_query,header)
+    classifier=train_svm(cur,train_query,header)
     print("Classification complete, total time= %s minutes" % (str((time() - start)/60.0)))
     connection.close()
