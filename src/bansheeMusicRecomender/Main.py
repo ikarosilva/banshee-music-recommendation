@@ -30,7 +30,7 @@ HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INT
                 'LastSyncedStamp':"INTEGER",'FileModifiedStamp':"INTEGER"
                 }
 
-CLASS_CUTOFF=4
+CLASS_CUTOFF=3
 LIMIT=8000
 
 def print_err(*args):
@@ -224,7 +224,7 @@ def train_svm(cur, query,header):
 
     # Split the dataset in two equal parts
     sc = StandardScaler().fit(features,labels)
-    features = sc.transform(features,labels)
+    #features = sc.transform(features,labels)
     X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.25, random_state=0)
     # Set the parameters by cross-validation
     #tuned_parameters = [{'kernel': ['rbf'], 'gamma': [1e-3, 1e-4],
@@ -269,9 +269,10 @@ def train_svm(cur, query,header):
     
     
     print("Generating suggestion list from %s songs"%(len(test_uri)))
-    test_features = sc.transform(test_features)
+    #test_features = sc.transform(test_features)
     predictions= clf.predict(test_features)
     suggestions=[ test_uri[i] for i,x in enumerate(predictions) if x==1]
+    #suggestions=[ uri[i] for i,x in enumerate(predictions) if x==1]
     f = open('/tmp/recommender.m3u','w')
     print("%s suggestions available."%(len(suggestions)))
     for song in suggestions:
@@ -280,9 +281,11 @@ def train_svm(cur, query,header):
     f.close()
     
 def train_forest(cur, query,header): 
+    from sklearn.preprocessing import StandardScaler
     labels, features, genre, composer,conductor, uri, test_features, test_uri= get_features(cur,query,header)
     
-    
+    sc = StandardScaler().fit(features,labels)
+    #features = sc.transform(features,labels)
     clf = RandomForestClassifier()
     param_dist = {"max_depth": [4, 8, 16],
                   "max_features": [2, 4 , np.shape(features)[1]],
@@ -312,6 +315,7 @@ def train_forest(cur, query,header):
     best_features=[feat_names[original.index(i)] for i in weight ]
     print("Best features=%s"%str(best_features))
     print("Generating suggestion list from %s songs"%(len(test_uri)))
+    #test_features = sc.transform(test_features)
     predictions= random_search.predict(test_features)
     suggestions=[ test_uri[i] for i,x in enumerate(predictions) if x==1]
     f = open('/tmp/recommender.m3u','w')
@@ -333,8 +337,8 @@ if __name__ == '__main__':
     start = time()
     connection = sqlite3.connect('/home/ikaro/.config/banshee-1/banshee.db')
     cur = connection.cursor()
-    header="Rating,ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Duration,Uri"
-    #header="Rating,ArtistID,AlbumID,Disc,Genre,Uri"
+    #header="Rating,ArtistID,AlbumID,Disc,Year,Genre,Composer,Conductor,Duration,Uri"
+    header="Rating,ArtistID,Genre,Uri"
     train_query="select " + header +" from CoreTracks;"
     classifier=train_svm(cur,train_query,header)
     print("Classification complete, total time= %s minutes" % (str((time() - start)/60.0)))
