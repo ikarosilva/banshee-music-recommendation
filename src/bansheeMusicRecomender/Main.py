@@ -20,6 +20,7 @@ from gensim import corpora, models
 from ArtistMap import artist_map
 from GenreMap import genre_map
 import re
+from functools import wraps
 
 HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INTEGER",'AlbumID':"INTEGER",'TagSetID':"INTEGER",'ExternalID':"INTEGER",'MusicBrainzID':"TEXT",
                 'Uri':"TEXT",'MimeType':"TEXT",'FileSize':"INTEGER",'BitRate':"INTEGER",'SampleRate':"INTEGER",'BitsPerSample':"INTEGER",'Attributes':"INTEGER",
@@ -32,6 +33,16 @@ HEADER={'PrimarySourceID':"INTEGER NOT NULL",'TrackID':"INTEGER",'ArtistID':"INT
 
 CLASS_CUTOFF=3
 LIMIT=8000
+
+def timefn(fn):
+    @wraps(fn)
+    def measure_time(*args,**kwargs):
+        t1 = time.time()
+        results = fn(*args,**kwargs)
+        t2 = time.time()
+        pritn("@timefn:"+ fn.func_name + " processing time: " + str(t2-t1) +  " seconds")
+        return results
+    return measure_time
 
 def print_err(*args):
     sys.stderr.write(' '.join(map(str,args)) + '\n')
